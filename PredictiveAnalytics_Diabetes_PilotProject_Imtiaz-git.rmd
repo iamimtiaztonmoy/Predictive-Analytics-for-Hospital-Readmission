@@ -1,0 +1,1006 @@
+---
+title: "HS 650 Predictive Analytics in Diabetes"
+author: "Md Imtiaz Khalil Ullah"
+date: "April 2025"
+output:
+  html_document:
+    theme: spacelab
+    highlight: tango
+    toc: true
+    number_sections: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+
+```{r global_options, include=FALSE}
+set.seed(123)
+library(knitr)
+library(kableExtra)
+
+opts_chunk$set(tidy.opts=list(width.cutoff=8), fig.width=12, warning=FALSE, message=FALSE)
+options(knitr.table.format = "html", width=100) 
+```
+
+# Abstract
+
+Diabetes is the one of the most common chronic disease in the United States. In this project, we use a diabetes dataset from UCI Machine Learning Repository, which represents 10 years of clinical care at 130 US hospitals and includes over 50 features representing patient and hospital outcomes. In general, we conduct analyses on three major topics: prediction of readmission at patient's first encounter, prediction of diabetic medication prescription at patient's first encounter, and finding overall patterns of medication usage. With multiple machine learning models, all of them can beat the majority baseline and the best model for patient readmission prediction is logistic regression. However, for the diabetic medication prescription prediction task, the average accuracy of all models are all close to the majority baseline. It shows that patients' demographic, encounter, and diagnosis information is really useful for predicting readmission, but diabetic medication prescription prediction might need more information. For overall patterns of medication usage, we find that Metformin and Insulin are more popular than other medicines. And to get the appropriate amounts of rules, association rules are more lenient with binarized medication data, and more strict with ordinal data without dropping the "No" option.We also find that dropping the "No" option when exploring with ordinal data helps reduce the noise due to high data density and provide more insights into the more interesting patterns.	
+
+# Background
+
+From the latest CDC report, More than 100 million U.S. adults are now living with diabetes or prediabetes. The report finds that as of 2015, 30.3 million Americans ??? 9.4 percent of the U.S. population ??? have diabetes. Another 84.1 million have prediabetes, a condition that if not treated often leads to type 2 diabetes within five years. The report confirms that the rate of new diabetes diagnoses remains steady. However, the disease continues to represent a growing health problem: Diabetes was the seventh leading cause of death in the U.S. in 2015. Diabetes is a serious disease that can often be managed through physical activity, diet, and the appropriate use of insulin and other medications to control blood sugar levels. People with diabetes are at increased risk of serious health complications including premature death, vision loss, heart disease, stroke, kidney failure, and amputation of toes, feet, or legs. We believe that early prediction of diabetic patients' readmission, medication prescription at their first encounters, as well as patterns of diabetic medication usage can be really helpful to manage patients' diabetes, reduce the cost of diabetes care and improve the oveall healthcare quality of diabetes. Those are what the "Triple Aim" is pursuing. To address these problems, we use a diabetes dataset which represents 10 years of clinical care at 130 US hospitals. The dataset includes over 50 features representing patient and hospital outcomes in demographic, encounter, and diagnosis fields. We hope this project can be a simple predictive analytics implementation in healthcare sector and probably generalized to other diseases in the future.
+
+# General Data Preprocessing
+
+```{r warning=FALSE}
+library(tidyverse)
+library(rvest)
+library(tableone)
+
+diabetes <- read.csv("D:/winter 24/Diabetes Prediction Project dataset/Diabetes_Dataset_1998_2008.csv")
+# Check data structure and summary, most of variables are categorical.
+str(diabetes)
+summary(diabetes)
+
+# Number of unique patients
+length(unique(diabetes$patient_nbr))
+```
+Check the missing data percent: variable "weight" has 96.86% missing.
+```{r}
+sapply(diabetes, function(x) round(sum(is.na(x))/nrow(diabetes), digits = 4))
+```
+Drop column "Weight" because of the high missing rate
+```{r}
+diabetes_wo_weight <- diabetes[, -6]
+
+# Number of completed cases.
+diabetes_complete <- diabetes[complete.cases(diabetes_wo_weight),]
+
+# Recode levels for discriptive statistics.
+diabetes_wo_weight$admission_type_id <- as.factor(as.character(diabetes_wo_weight$admission_type_id))
+diabetes_wo_weight$discharge_disposition_id <- as.factor(as.character(diabetes_wo_weight$discharge_disposition_id))
+diabetes_wo_weight$admission_source_id <- as.factor(as.character(diabetes_wo_weight$admission_source_id))
+
+levels(diabetes_wo_weight$admission_type_id) <- list('Emergency Urgent' = '1', 'Elective' = '2', 'Newborn' = '3', 'Not Available' = '4', 'NULL' = '5', 'Trauma Center' = '6', 'Not Mapped' = '7')
+
+levels(diabetes_wo_weight$discharge_disposition_id) <- list('Discharged to home' =  '1', 'Discharged/transferred to another short term hospital' = '2', 'Discharged/transferred to SNF' = '3', 'Discharged/transferred to ICF' = '4', 'Discharged/transferred to another type of inpatient care institution' = '5', 'Discharged/transferred to home with home health service' = '6', 'Left AMA' = '7', 'Discharged/transferred to home under care of Home IV provider' = '8', 'Admitted as an inpatient to this hospital' = '9', 'Neonate discharged to another hospital for neonatal aftercare' = '10', 'Expired' = '11', 'Still patient or expected to return for outpatient services' = '12', 'Hospice / home' = '13', 'Hospice / medical facility' = '14', 'Discharged/transferred within this institution to Medicare approved swing bed' = '15', 'Discharged/transferred/referred another institution for outpatient services' = '16', 'Discharged/transferred/referred to this institution for outpatient services' = '17', 'NULL' = '18', 'Expired at home. Medicaid only, hospice' = '19', 'Expired in a medical facility. Medicaid only, hospice' = '20', 'Expired, place unknown. Medicaid only, hospice' = '21', 'Discharged/transferred to another rehab fac including rehab units of a hospital' = '22', 'Discharged/transferred to a long term care hospital' = '23', 'Discharged/transferred to a nursing facility certified under Medicaid but not certified under Medicare' = '24', 'Not Mapped' = '25',  'Unknown/Invalid' = '26', 'Discharged/transferred to another Type of Health Care Institution not Defined Elsewhere' = '30',  'Discharged/transferred to a federal health care facility' = '27', 'Discharged/transferred/referred to a psychiatric hospital of psychiatric distinct part unit of a hospital' = '28', 'Discharged/transferred to a Critical Access Hospital (CAH)' = '29')
+
+levels(diabetes_wo_weight$admission_source_id) <- list('Physician Referral' = '1', 'Clinic Referral' = '2', 'HMO Referral' = '3', 'Transfer from a hospital' = '4', 'Transfer from a Skilled Nursing Facility (SNF)' = '5', 'Transfer from another health care facility' = '6', 'Emergency Room' = '7', 'Court/Law Enforcement' = '8', 'Not Available' = '9', 'Transfer from critial access hospital' = '10', 'Normal Delivery' = '11', 'Premature Delivery' = '12', 'Sick Baby' = '13', 'Extramural Birth' = '14', 'Not Available' = '15', 'NULL' = '17', 'Transfer From Another Home Health Agency' = '18', 'Readmission to Same Home Health Agency' = '19', 'Not Mapped' = '20', 'Unknown/Invalid' = '21', 'Transfer from hospital inpt/same fac reslt in a sep claim' = '22', 'Born inside this hospital' = '23', 'Born outside this hospital' = '24', 'Transfer from Ambulatory Surgery Center' = '25', 'Transfer from Hospice' = '26')
+
+levels(diabetes_wo_weight$diag_1) <- list('Circulatory' = c(as.character(390:459), '785'), 'Respiratory' = c(as.character(460:519), '786'), 'Digestive' = c(as.character(520:579), '787'), 'Diabetes' = c(grep('250.*', diabetes_wo_weight$diag_1, value = TRUE)), 'Injury' = c(as.character(800:999)), 'Musculoskeletal' = c(as.character(710:739)), 'Genitourinary' = c(as.character(580:629), '788'), 'Neoplasms' = c(as.character(140:239), '780', '781', '784', as.character(790:799), as.character(240:249, 251:279), as.character(680:709), '782', as.character(1:139)), 'Other' = c(as.character(290:319, 280:289, 320:359, 630:679, 360:389, 740:759), c(grep('A-Z.*', diabetes_wo_weight$diag_1, value = TRUE))))
+
+levels(diabetes_wo_weight$diag_2) <- list('Circulatory' = c(as.character(390:459), '785'), 'Respiratory' = c(as.character(460:519), '786'), 'Digestive' = c(as.character(520:579), '787'), 'Diabetes' = c(grep('250.*', diabetes_wo_weight$diag_2, value = TRUE)), 'Injury' = c(as.character(800:999)), 'Musculoskeletal' = c(as.character(710:739)), 'Genitourinary' = c(as.character(580:629), '788'), 'Neoplasms' = c(as.character(140:239), '780', '781', '784', as.character(790:799), as.character(240:249, 251:279), as.character(680:709), '782', as.character(1:139)), 'Other' = c(as.character(290:319, 280:289, 320:359, 630:679, 360:389, 740:759), c(grep('A-Z.*', diabetes_wo_weight$diag_2, value = TRUE))))
+
+levels(diabetes_wo_weight$diag_3) <- list('Circulatory' = c(as.character(390:459), '785'), 'Respiratory' = c(as.character(460:519), '786'), 'Digestive' = c(as.character(520:579), '787'), 'Diabetes' = c(grep('250.*', diabetes_wo_weight$diag_3, value = TRUE)), 'Injury' = c(as.character(800:999)), 'Musculoskeletal' = c(as.character(710:739)), 'Genitourinary' = c(as.character(580:629), '788'), 'Neoplasms' = c(as.character(140:239), '780', '781', '784', as.character(790:799), as.character(240:249, 251:279), as.character(680:709), '782', as.character(1:139)), 'Other' = c(as.character(290:319, 280:289, 320:359, 630:679, 360:389, 740:759), c(grep('A-Z.*', diabetes_wo_weight$diag_3, value = TRUE))))
+
+TableOne <- CreateTableOne(vars = c('race', 'gender', 'age', 'diag_1', 'A1Cresult', 'time_in_hospital', 'number_diagnoses'), data = diabetes_wo_weight)
+table_1_data <- 
+  print(TableOne, quote = FALSE, noSpaces = FALSE, printToggle = FALSE) %>% 
+  as.data.frame() %>% 
+  rownames_to_column('Characteristics')
+table_1_data
+```
+
+Here is a list of selected discriptive statistics. 
+
+- "Caucasian" is the largest population.
+- There are over 80% patients aged over 50.
+- Circulatory is the most common diagnosis.
+- Most of patients don't have A1C result
+- Patients' time in hospital (mean (sd)): 4.40 (2.99)			
+- Patients' number of diagnoses (mean (sd)): 7.42 (1.93)
+
+## Data Preprocessing for Prediction Tasks
+We want to explore whether patients' demographic, encounter, diagnosis information can precisely predict patient readmission and diabetic medication prescribtion at patients' first encounter.Thus, for each unique patient, only the first encounter information is included.
+
+```{r}
+diabetes_first_enc <- 
+  diabetes_wo_weight %>% 
+  group_by(patient_nbr) %>% 
+  arrange(encounter_id) %>% 
+  slice(1)
+```
+
+
+
+# Readmitted Prediction 
+We want to predict whether the patient will back to the hospital after their first encounter. After removing the weight, encounter_id and patient_id, there are 47 features left. But the 47 features include the readmitted label, so we need to remove this column as well. After doing this, there are in total 46 features.  Also, the original readmitted column inclue three value: "NO", ">30", and "<30". These three value reprent "no revisit", "readmitted in more than 30 days", and "readmitted in less than 30 days". 
+```{R }
+read_col<-diabetes_first_enc[, c(49)]
+table(read_col)
+table(read_col)/nrow(read_col)
+```
+
+Becuase we only want to predict whether the patient readmitted or not, so we merge the ">30" and "<30" value into "Yes".
+```{r}
+read_col<-data.frame(read_col)
+read_col<-ifelse(read_col != 'NO', 'YES', 'NO')
+table(read_col)
+table(read_col)/nrow(read_col)
+```
+
+Prepare the training and test dataset.
+```{r warning=FALSE}
+diabetes_read_data_twotype <- diabetes_first_enc[, -c(1, 2,11)]
+diabetes_read_data_twotype$readmitted_binary<-ifelse(diabetes_read_data_twotype$readmitted != 'NO', 'YES', 'NO')
+diabetes_read_data_twotype$readmitted_binary<-as.factor(diabetes_read_data_twotype$readmitted_binary)
+diabetes_read_data<-diabetes_read_data_twotype[,-46]
+set.seed(123)
+diabetes_read_data<-diabetes_read_data[sample(nrow(diabetes_read_data)),]
+#Create 5 equal-sized folds
+folds <- cut(seq(1,nrow(diabetes_read_data)),breaks=5,labels=FALSE)
+```
+
+## Majority Baseline
+The majority baseline is:
+```{R}
+max(table(diabetes_read_data$readmitted_binary))/length(diabetes_read_data$readmitted_binary)
+```
+
+## Methods and Results
+### Naive Bayes
+The first model we use is the Naive Bayes classifier. Naive Bayes model can handle missing values, so we can use the whole dataset.      
+Here is the code of how we train the model and do the 5-fold cross validation evaluation. The average accuracy is 0.6279, which beats the baseline. 
+```{r warning=FALSE}
+library(e1071)
+library(gmodels)
+set.seed(123)
+ave_accuracy=0
+for(i in 1:5){
+    #Segement your data by folds using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    diabetes_read_data_test <- diabetes_read_data[testIndexes, ]
+    diabetes_read_data_train <- diabetes_read_data[-testIndexes, ]
+    #Use the test and train data partitions however you desire...
+    diabetesRead_pred_NB <- naiveBayes(readmitted_binary ~ ., data = diabetes_read_data_train)
+    diabetesRead_test_NB <- predict(diabetesRead_pred_NB, diabetes_read_data_test[, -46])
+    #CrossTable(diabetesRead_test_NB, diabetes_read_data_test$readmitted_binary)
+    cm = as.matrix(table(Actual = diabetes_read_data_test$readmitted_binary, Predicted = diabetesRead_test_NB))
+     n = sum(cm) # number of instances
+     nc = nrow(cm) # number of classes
+     diag = diag(cm) # number of correctly classified instances per class 
+     rowsums = apply(cm, 1, sum) # number of instances per class
+     colsums = apply(cm, 2, sum) # number of predictions per class
+     p = rowsums / n # distribution of instances over the actual classes
+     q = colsums / n # distribution of instances over the predicted classes
+     accuracy = sum(diag) / n 
+     precision = diag / colsums
+     recall = diag / rowsums
+     f1 = 2 * precision * recall / (precision + recall)
+    ave_accuracy=ave_accuracy+accuracy
+    print(paste0("Round: ", i))
+    macroPrecision = mean(precision)
+    macroRecall = mean(recall)
+    macroF1 = mean(f1)
+    print(data.frame(accuracy,macroPrecision, macroRecall, macroF1))
+}
+print(paste0("Ave Accuracy: ", ave_accuracy/5.0))
+```
+Check the ROC curve, the AUC value is 0.560.
+```{r}
+library(ROSE)
+roc.curve(diabetes_read_data_test$readmitted_binary, diabetesRead_test_NB, curve=TRUE)
+```
+
+### Random Forest classifier
+The second model we use is the Random Forest classifier. To evaluate the model, we also do 5-fold cross validation evaluation.   
+Since the RF model we build can only deal with the completed dataset, the majority baseline changes to:
+```{R}
+diabetes_read_data_com<-diabetes_read_data[complete.cases(diabetes_read_data),]
+max(table(diabetes_read_data_com$readmitted_binary))/length(diabetes_read_data_com$readmitted_binary)
+```
+
+To tune the parameter of the number of the trees, we try `ntree` = 50, 200 and 500. 
+```{r warning=FALSE}
+# Random Forest
+library(randomForest)
+library(caret)
+set.seed(123)
+diabetes_read_data_com<-diabetes_read_data[complete.cases(diabetes_read_data),]
+folds <- cut(seq(1,nrow(diabetes_read_data_com)),breaks=5,labels=FALSE)
+ave_accuracy=0
+for(i in 1:5){
+    #Segement your data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    diabetes_read_data_test <- diabetes_read_data_com[testIndexes, ]
+    diabetes_read_data_train <- diabetes_read_data_com[-testIndexes, ]
+    #Use the test and train data partitions however you desire...
+    diabetesRead_pred_RF <- randomForest(readmitted_binary~., data = as.data.frame(diabetes_read_data_train), ntree = 50,importance = TRUE)
+    diabetesRead_test_RF<-predict(diabetesRead_pred_RF,diabetes_read_data_test, type='class')
+
+    cm = as.matrix(table(Actual = diabetes_read_data_test$readmitted_binary, Predicted = diabetesRead_test_RF))
+     n = sum(cm) # number of instances
+     nc = nrow(cm) # number of classes
+     diag = diag(cm) # number of correctly classified instances per class 
+     rowsums = apply(cm, 1, sum) # number of instances per class
+     colsums = apply(cm, 2, sum) # number of predictions per class
+     p = rowsums / n # distribution of instances over the actual classes
+     q = colsums / n # distribution of instances over the predicted classes
+     accuracy = sum(diag) / n 
+     precision = diag / colsums
+     recall = diag / rowsums
+     f1 = 2 * precision * recall / (precision + recall)
+    ave_accuracy=ave_accuracy+accuracy
+    print(paste0("Round: ", i))
+    macroPrecision = mean(precision)
+    macroRecall = mean(recall)
+    macroF1 = mean(f1)
+    print(data.frame(accuracy,macroPrecision, macroRecall, macroF1))
+}
+print(paste0("Ave Accuracy: ", ave_accuracy/5.0))
+#50,  0.62257
+#200, 0.628840512939706
+#500, 0.63129
+```
+The average accuracy is 0.62257, 0.6288 and 0.6313, which increases with the number of trees. Here, we only set the `ntree` equal to 50 because it will take a while to run the code when we increase the `ntree` value.
+
+Plot the ROC curve, the AUC value is 0.578, better than the Naive Bayes model.
+```{r}
+roc.curve(diabetes_read_data_test$readmitted_binary, diabetesRead_test_RF, curve=TRUE)
+```
+We also let the Random Forest model return the most important features. Here is the feature graph. 
+```{r}
+varImpPlot(diabetesRead_pred_RF,cex=0.7)
+```
+
+As we can see, the top 5 important features include the `discharge_disposition_id`, `admission_source_id`, `number_inpatient`, `number_emergency` and `diabetesMed`. The `discharge_disposition_id` will tell us where the patient goes after they discharged, whether the patient goes to local hospital or go back home, etc. The `admission_source_id` tells us where the patient comes from. The `number_inpatient` is how long the patient stay in the hospital and `number_emergency` is how many times the patient visits the emergency department in one year. If the figure of `number_inpatient` and `number_emergency` are really large, that means the patient is in a more serve situation, and there is a higher chance the patient gets readmitted.
+
+Based on the result of feature importance, we decide to use the top 10 features to retrain the model. However, the average accuracy decreases to 0.6164 (`ntree`=5), which means other features still make great contributions to the model.
+```{r warning=FALSE}
+#after feature selection
+diabetes_read_data_com<-diabetes_read_data[complete.cases(diabetes_read_data),]
+diabetes_read_data_com<-diabetes_read_data_com[,c(5,6,14,13,45,46,18,12,4,8,9)]
+folds <- cut(seq(1,nrow(diabetes_read_data_com)),breaks=5,labels=FALSE)
+ave_accuracy=0
+for(i in 1:5){
+    #Segement your data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    diabetes_read_data_test <- diabetes_read_data_com[testIndexes, ]
+    diabetes_read_data_train <- diabetes_read_data_com[-testIndexes, ]
+    #Use the test and train data partitions however you desire...
+    diabetesRead_pred_RF <- randomForest(readmitted_binary~., data = as.data.frame(diabetes_read_data_train), ntree = 50,importance = TRUE)
+    diabetesRead_test_RF<-predict(diabetesRead_pred_RF,diabetes_read_data_test, type='class')
+
+    cm = as.matrix(table(Actual = diabetes_read_data_test$readmitted_binary, Predicted = diabetesRead_test_RF))
+     n = sum(cm) # number of instances
+     nc = nrow(cm) # number of classes
+     diag = diag(cm) # number of correctly classified instances per class 
+     rowsums = apply(cm, 1, sum) # number of instances per class
+     colsums = apply(cm, 2, sum) # number of predictions per class
+     p = rowsums / n # distribution of instances over the actual classes
+     q = colsums / n # distribution of instances over the predicted classes
+     accuracy = sum(diag) / n 
+     precision = diag / colsums
+     recall = diag / rowsums
+     f1 = 2 * precision * recall / (precision + recall)
+    ave_accuracy=ave_accuracy+accuracy
+    print(paste0("Round: ", i))
+    macroPrecision = mean(precision)
+    macroRecall = mean(recall)
+    macroF1 = mean(f1)
+    print(data.frame(accuracy,macroPrecision, macroRecall, macroF1))
+}
+print(paste0("Ave Accuracy: ", ave_accuracy/5.0))
+```
+Check the ROC curve, the AUC value is 0.552, worse than the performances of both the model before feature selection and the Naive Bayes model.
+```{r}
+roc.curve(diabetes_read_data_test$readmitted_binary, diabetesRead_test_RF, curve=TRUE)
+```
+
+### Logistic Regression
+The third model we use is Logistic Regression and the average accuracy is 0.6357, which also beats the majority baseline. And the Area Under the Curve (AUC) is also higher than other models. Besides the accuracy, the training and predicting time of this model is much faster than the other models.
+```{R warning=FALSE}
+#Logistic Regression
+
+### Logistic Regression
+
+### Logistic Regression
+
+# Updated helper function to remove unseen factor levels from test data
+remove_missing_levels <- function(fit, test_data) {
+  for (var in names(fit$xlevels)) {
+    if (var %in% names(test_data)) {
+      test_data[[var]] <- as.character(test_data[[var]])
+      test_data[[var]][!(test_data[[var]] %in% fit$xlevels[[var]])] <- NA
+      test_data[[var]] <- factor(test_data[[var]], levels = fit$xlevels[[var]])
+    }
+  }
+  return(test_data)
+}
+
+# Set seed and prepare data
+set.seed(123)
+diabetes_read_data$readmitted_binary <- as.factor(diabetes_read_data$readmitted_binary)
+diabetes_read_data_lr <- diabetes_read_data[, c(1:25, 27:33, 35, 38, 39, 44:46)]
+
+# Create 5 folds
+folds <- cut(seq(1, nrow(diabetes_read_data_lr)), breaks = 5, labels = FALSE)
+ave_accuracy <- 0
+
+# Placeholder for ROC curve from last fold
+final_results <- NULL
+
+# Perform 5-fold cross-validation
+for (i in 1:5) {
+  testIndexes <- which(folds == i, arr.ind = TRUE)
+  test_data <- diabetes_read_data_lr[testIndexes, ]
+  train_data <- diabetes_read_data_lr[-testIndexes, ]
+
+  # Fit logistic regression model
+  model <- glm(readmitted_binary ~ ., data = train_data, family = "binomial")
+
+  # Clean test data from unseen factor levels
+  test_data_clean <- remove_missing_levels(model, test_data)
+
+  # Predict
+  probs <- predict(model, newdata = test_data_clean, type = "response")
+  predictions <- ifelse(probs > 0.5, "YES", "NO")
+
+  # Evaluate
+  results <- data.frame(value = probs, result = predictions, label = test_data$readmitted_binary)
+  results <- results[complete.cases(results$result), ]
+  results$result <- factor(results$result)
+  results$label <- factor(results$label)
+
+  # Save for final ROC
+  final_results <- results
+
+  cm <- table(Actual = results$label, Predicted = results$result)
+  n <- sum(cm)
+  diag_vals <- diag(cm)
+  rowsums <- rowSums(cm)
+  colsums <- colSums(cm)
+  accuracy <- sum(diag_vals) / n
+  precision <- diag_vals / colsums
+  recall <- diag_vals / rowsums
+  f1 <- 2 * precision * recall / (precision + recall)
+
+  macroPrecision <- mean(precision, na.rm = TRUE)
+  macroRecall <- mean(recall, na.rm = TRUE)
+  macroF1 <- mean(f1, na.rm = TRUE)
+
+  ave_accuracy <- ave_accuracy + accuracy
+
+  print(paste0("Round: ", i))
+  print(data.frame(accuracy, macroPrecision, macroRecall, macroF1))
+}
+
+print(paste0("Ave Accuracy: ", ave_accuracy / 5))
+
+
+
+```
+Check the ROC curve, the AUC value is 0.576, better than the RF model after feature selection (0.552) and worse than the RF model before feature selection (0.578).
+```{r}
+library(ROSE)
+final_results <- final_results[complete.cases(final_results$result), ]
+final_results$label <- as.factor(final_results$label)
+final_results$result <- as.factor(final_results$result)
+
+roc.curve(final_results$label, final_results$result, curve=TRUE)
+```
+
+### Support Vector Machine
+The last model we use is SVM Model and the average accuracy is 0.6212. The model takes really long time to run, so after we finish the cross-validation, we only keep the first trail in the code. (change the for loop from 1:1 to 1:5 will run all the trails).
+```{R warning=FALSE}
+library(kernlab)
+set.seed(123)
+diabetes_read_data_lr<-diabetes_read_data[,c(1:25,27:33,35,38,39,44:46)]
+diabetes_read_data_lr_com<-diabetes_read_data_lr[complete.cases(diabetes_read_data_lr),]
+folds <- cut(seq(1,nrow(diabetes_read_data_lr_com)),breaks=5,labels=FALSE)
+ave_accuracy=0
+for(i in 1:1){
+    #Segement your data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    diabetes_read_data_test <- diabetes_read_data_lr_com[testIndexes, ]
+    diabetes_read_data_train <- diabetes_read_data_lr_com[-testIndexes, ]
+    Readmit_SVM_classifier <- ksvm(readmitted_binary ~ ., data = diabetes_read_data_train, kernel = "vanilladot")
+    read_svm_predictions <- predict(Readmit_SVM_classifier, diabetes_read_data_test)
+    cm = as.matrix(table(Actual = diabetes_read_data_test$readmitted_binary, Predicted = read_svm_predictions))
+     n = sum(cm) # number of instances
+     nc = nrow(cm) # number of classes
+     diag = diag(cm) # number of correctly classified instances per class 
+     rowsums = apply(cm, 1, sum) # number of instances per class
+     colsums = apply(cm, 2, sum) # number of predictions per class
+     p = rowsums / n # distribution of instances over the actual classes
+     q = colsums / n # distribution of instances over the predicted classes
+     accuracy = sum(diag) / n 
+     precision = diag / colsums
+     recall = diag / rowsums
+     f1 = 2 * precision * recall / (precision + recall)
+    ave_accuracy=ave_accuracy+accuracy
+    print(paste0("Round: ", i))
+    macroPrecision = mean(precision)
+    macroRecall = mean(recall)
+    macroF1 = mean(f1)
+    print(data.frame(accuracy,macroPrecision, macroRecall, macroF1))
+}
+```
+Check the ROC curve, the AUC value is 0.533, worse than the previous models. 
+```{r}
+roc.curve(diabetes_read_data_test$readmitted_binary, read_svm_predictions, curve=TRUE)
+```
+
+### Boruta Feature Selection
+The whole dataset has 71,518 unique patients and it takes over several hours to run Boruta Feature Selection on the whole dataset. Thus, we decide to resample the dataset and run the Boruta Feature Selection in the subset. 
+
+We set `number of patient`=2000, `maxRuns`=201. 
+```{R warning=FALSE}
+library(Boruta)
+diabetes_read_data_fselect<-as.data.frame(diabetes_read_data)
+for (i in 1:46)
+  {
+  diabetes_read_data_fselect[,i] <- as.character(diabetes_read_data_fselect[,i])
+  diabetes_read_data_fselect[,i][is.na(diabetes_read_data_fselect[,i])] <- ""
+}
+
+diabetes_read_data_fselect<-diabetes_read_data_fselect[1:2000,]
+diabetes_read_data_fselect$readmitted_binary<-factor(diabetes_read_data_fselect$readmitted_binary)
+summary(diabetes_read_data_fselect$readmitted_binary)
+```
+Apply the Boruta model.
+```{r}
+set.seed(123)
+ppmi_Boruta<-Boruta(readmitted_binary~., data=diabetes_read_data_fselect, doTrace=0,maxRuns=201)
+print(ppmi_Boruta)
+
+plot(ppmi_Boruta, xlab="", xaxt="n")
+lz<-lapply(1:ncol(ppmi_Boruta$ImpHistory), function(i)
+ppmi_Boruta$ImpHistory[is.finite(ppmi_Boruta$ImpHistory[, i]), i])
+names(lz)<-colnames(ppmi_Boruta$ImpHistory)
+lb<-sort(sapply(lz, median))
+axis(side=1, las=2, labels=names(lb), at=1:ncol(ppmi_Boruta$ImpHistory), cex.axis=0.5, font = 4)
+```
+
+## Discussions
+Among all of these models in this sub-task, Naive Bayes can handle missing value, so it can be applied to the whole dataset. It also beats the majority baseline (also AUC=0.628) in a relatively shorter time.     
+Random Forest, Logistic Regression, and SVM can not handle missing input, but all of them can beat the baseline. The accuracy we get by using Random Forest will keep increasing if we use more decision trees, but the training time will grow a lot. Compare with Random Forest model, Logistic Regression can reach a similar accuracy rate, and AUC score with less time. SVM performs the worst among these models, and it also requires the longest training time. 
+
+
+ 
+# Diabetes Medication Prediction
+Goal: Predict whether diabetic medication is prescribed at patient's first encounter.
+Target dependent variable: `diabetesMed`.
+We want to explore whether patients' demographic, encounter, diagnosis information will precisely predict diabetic medication prescribtion at the patient's first encounter.
+```{r}
+# Remove all medication and readmission information because of potential leakage to the outcome variable.
+diabetes_data <- diabetes_first_enc[, -c(1, 2, 11, 14, 24:47, 49)]
+# Shuffle the dataset.
+diabetes_data <- diabetes_data[sample(nrow(diabetes_data)),]
+# Create 5 equally size folds.
+folds <- cut(seq(1, nrow(diabetes_data)), breaks=5, labels=FALSE)
+```
+
+## Correlation Check:
+Correlation check, there is no high correlation between any feature and the outcome, so all features are good to go into the model.
+```{r}
+library(GGally)
+ggpairs(data = diabetes_data[c(9:13, 17, 20)], title = "Yes/No Diabetes Medications",
+        mapping = ggplot2::aes(colour = diabetesMed),
+        lower = list(combo = wrap("facethist", binwidth=1)))
+```
+
+## Majority Baseline
+Majority baseline accuracy -- All cases:
+```{r}
+sum(diabetes_data$diabetesMed == "Yes")/nrow(diabetes_data)
+```
+Majority baseline accuracy -- Completed cases:
+```{r}
+sum(diabetes_data[complete.cases(diabetes_data),]$diabetesMed == "Yes")/nrow(diabetes_data[complete.cases(diabetes_data),])
+```
+The reason why we check both all cases and completed cases majority baselines is because some of the models we are going to use are applicable to all cases while others are not.
+
+## Methods and Results
+### Naive Bayes
+Navie Bayes is applicable to all cases whose majority baseline is 0.7595, the average accuaracy of the Naive Bayes model is 0.7333, which does not beat the majority baseline.
+
+```{r}
+set.seed(123)
+ave_accuracy=0
+for(i in 1:5){
+    #Segement your data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    diabetes_data_test <- diabetes_data[testIndexes, ]
+    diabetes_data_train <- diabetes_data[-testIndexes, ]
+    #Use the test and train data partitions however you desire...
+    diabetesMed_pred_NB <- naiveBayes(diabetesMed ~ ., data = diabetes_data_train)
+    diabetesMed_test_NB <- predict(diabetesMed_pred_NB, diabetes_data_test[, -20])
+    #CrossTable(diabetesRead_test_NB, diabetes_read_data_test$readmitted_binary)
+    cm = as.matrix(table(Actual = diabetes_data_test$diabetesMed, Predicted = diabetesMed_test_NB))
+     n = sum(cm) # number of instances
+     nc = nrow(cm) # number of classes
+     diag = diag(cm) # number of correctly classified instances per class 
+     rowsums = apply(cm, 1, sum) # number of instances per class
+     colsums = apply(cm, 2, sum) # number of predictions per class
+     p = rowsums / n # distribution of instances over the actual classes
+     q = colsums / n # distribution of instances over the predicted classes
+     accuracy = sum(diag) / n 
+     precision = diag / colsums
+     recall = diag / rowsums
+     f1 = 2 * precision * recall / (precision + recall)
+    ave_accuracy=ave_accuracy+accuracy
+    macroPrecision = mean(precision)
+    macroRecall = mean(recall)
+    macroF1 = mean(f1)
+    print(data.frame(accuracy,macroPrecision, macroRecall, macroF1))
+}
+print(paste0("Ave Accuracy: ", ave_accuracy/5.0))
+```
+Check the ROC curve, we can see the AUC is 0.554. 
+```{r}
+roc.curve(diabetes_data_test$diabetesMed, diabetesMed_test_NB, curve=TRUE)
+```
+
+### Random Forest
+Random Forest is applicable to completed cases whose majority baseline is 0.7865, the accuracy of the Random Forest model is almost the same as the majority baseline. The Random Forest model also has much better evaluation performance than the Naive Bayes model in terms of the Specificity. Its F1 score is 0.8757, which is a pretty good result. 
+
+```{r}
+set.seed(123)
+ave_accuracy=0
+for(i in 1:5){
+    #Segement your data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    diabetes_data_test <- diabetes_data[testIndexes, ]
+    diabetes_data_train <- diabetes_data[-testIndexes, ]
+    #Use the test and train data partitions however you desire...
+    diabetesMed_pred_RF <- randomForest(diabetesMed~., data = diabetes_data_train[complete.cases(diabetes_data_train), ], importance=TRUE, ntree=200, mtry=10)
+    diabetesMed_test_RF <- predict(diabetesMed_pred_RF, diabetes_data_test, type = 'class')
+    #CrossTable(diabetesRead_test_NB, diabetes_read_data_test$readmitted_binary)
+    cm = as.matrix(table(Actual = diabetes_data_test$diabetesMed, Predicted = diabetesMed_test_RF))
+     n = sum(cm) # number of instances
+     nc = nrow(cm) # number of classes
+     diag = diag(cm) # number of correctly classified instances per class 
+     rowsums = apply(cm, 1, sum) # number of instances per class
+     colsums = apply(cm, 2, sum) # number of predictions per class
+     p = rowsums / n # distribution of instances over the actual classes
+     q = colsums / n # distribution of instances over the predicted classes
+     accuracy = sum(diag) / n 
+     precision = diag / colsums
+     recall = diag / rowsums
+     f1 = 2 * precision * recall / (precision + recall)
+    ave_accuracy=ave_accuracy+accuracy
+    macroPrecision = mean(precision)
+    macroRecall = mean(recall)
+    macroF1 = mean(f1)
+    print(data.frame(accuracy,macroPrecision, macroRecall, macroF1))
+}
+print(paste0("Ave Accuracy: ", ave_accuracy/5.0))
+```
+In addition, from all 5 variable importance charts, we can see those top variables are almost same such as `A1Cresult`, `time_in_hospita`l, `diag_1`, and so on.
+```{r}
+varImpPlot(diabetesMed_pred_RF, cex=0.7) 
+```
+
+Check the ROC curve, the AUC area is 0.507, worse than the performance of Naive Bayes. It might be due to the lack of information for the given features.
+```{r}
+combine_l_p<-data.frame(diabetesMed_test_RF,diabetes_data_test$diabetesMed)
+combine_l_p<-combine_l_p[complete.cases(combine_l_p),]
+roc.curve(combine_l_p[,2], combine_l_p[,1], curve=TRUE)
+```
+
+### Logistic Regression
+Logistic Regression is applicable to partial completed cases since it can only predict cases whose levels in all variables appear in the training set. Although the accuracy of Logistic Regression is 0.7861, which is almost same as the majority baseline for completed cases which is 0.7865, we cannot determine the performance because of different test sets.
+
+```{r}
+remove_missing_levels <- function(fit, test_data) {
+
+  # drop empty factor levels in test data
+  test_data %>%
+    droplevels() %>%
+    as.data.frame() -> test_data
+
+  # 'fit' object structure of 'lm' and 'glmmPQL' is different so we need to
+  # account for it
+  if (any(class(fit) == "glmmPQL")) {
+    # Obtain factor predictors in the model and their levels
+    factors <- (gsub("[-^0-9]|as.factor|\\(|\\)", "",
+                     names(unlist(fit$contrasts))))
+    # do nothing if no factors are present
+    if (length(factors) == 0) {
+      return(test_data)
+    }
+
+    map(fit$contrasts, function(x) names(unmatrix(x))) %>%
+      unlist() -> factor_levels
+    factor_levels %>% str_split(":", simplify = TRUE) %>%
+      extract(, 1) -> factor_levels
+
+    model_factors <- as.data.frame(cbind(factors, factor_levels))
+  } else {
+    # Obtain factor predictors in the model and their levels
+    factors <- (gsub("[-^0-9]|as.factor|\\(|\\)", "",
+                     names(unlist(fit$xlevels))))
+    # do nothing if no factors are present
+    if (length(factors) == 0) {
+      return(test_data)
+    }
+
+    factor_levels <- unname(unlist(fit$xlevels))
+    model_factors <- as.data.frame(cbind(factors, factor_levels))
+  }
+
+  # Select column names in test data that are factor predictors in
+  # trained model
+
+  predictors <- names(test_data[names(test_data) %in% factors])
+
+  # For each factor predictor in your data, if the level is not in the model,
+  # set the value to NA
+
+  for (i in 1:length(predictors)) {
+    found <- test_data[, predictors[i]] %in% model_factors[
+      model_factors$factors == predictors[i], ]$factor_levels
+    if (any(!found)) {
+      # track which variable
+      var <- predictors[i]
+      # set to NA
+      test_data[!found, predictors[i]] <- NA
+      # drop empty factor levels in test data
+      test_data %>%
+        droplevels() -> test_data
+    }
+  }
+  return(test_data)
+}
+
+set.seed(123)
+ave_accuracy=0
+for(i in 1:5){
+    #Segement your data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    diabetes_data_test <- diabetes_data[testIndexes, ]
+    diabetes_data_train <- diabetes_data[-testIndexes, ]
+    #Use the test and train data partitions however you desire...
+    diabetesMed_pred_LR <-glm(formula = diabetes_data_train$diabetesMed ~., data=diabetes_data_train, family = "binomial")
+    diabetesMed_test_LR <- predict(diabetesMed_pred_LR, newdata = remove_missing_levels (fit = diabetesMed_pred_LR, test_data = diabetes_data_test), type = "response")
+    diabetesMed_test_LR <- as.data.frame(diabetesMed_test_LR)
+    diabetesMed_test_LR$binary_result <- ifelse(diabetesMed_test_LR > 0.5, "YES", "NO")
+    diabetesMed_test_LR <- data.frame(diabetesMed_test_LR, diabetes_data_test$diabetesMed)
+    colnames(diabetesMed_test_LR) <- c('value','result','label')
+    
+    diabetesMed_test_LR_no <- diabetesMed_test_LR[complete.cases(diabetesMed_test_LR$result),]
+    diabetesMed_test_LR_no$label <- as.factor(diabetesMed_test_LR_no$label)
+    diabetesMed_test_LR_no$result <- as.factor(diabetesMed_test_LR_no$result)
+    cm = as.matrix(table(Actual = diabetesMed_test_LR_no$label, Predicted = diabetesMed_test_LR_no$result))
+     n = sum(cm) # number of instances
+     nc = nrow(cm) # number of classes
+     diag = diag(cm) # number of correctly classified instances per class 
+     rowsums = apply(cm, 1, sum) # number of instances per class
+     colsums = apply(cm, 2, sum) # number of predictions per class
+     p = rowsums / n # distribution of instances over the actual classes
+     q = colsums / n # distribution of instances over the predicted classes
+     accuracy = sum(diag) / n 
+     precision = diag / colsums
+     recall = diag / rowsums
+     f1 = 2 * precision * recall / (precision + recall)
+    ave_accuracy=ave_accuracy+accuracy
+    macroPrecision = mean(precision)
+    macroRecall = mean(recall)
+    macroF1 = mean(f1)
+    print(data.frame(accuracy,macroPrecision, macroRecall, macroF1))
+
+}
+print(paste0("Ave Accuracy: ", ave_accuracy/5.0))
+```
+Check the ROC curve, the AUC area is 0.509, not a big improvement of the Random Forest model. Similar to the ROC result of the Random Forest, it might be due to the lack of information for the given features.
+```{r}
+roc.curve(diabetesMed_test_LR_no$label, diabetesMed_test_LR_no$result, curve=TRUE)
+```
+
+### Boruta Feature Selection
+Compared with the variable importance chart in the Random Forest part above, `AICresult`, `age`, and `time_in_hospital` are some top variables selected from both methods.
+
+```{r}
+diabetes_data_fselect <- as.data.frame(diabetes_data)
+for (i in 1:20){
+  diabetes_data_fselect[,i] <- as.character(diabetes_data_fselect[,i])
+  diabetes_data_fselect[,i][is.na(diabetes_data_fselect[,i])] <- ""
+}
+
+diabetes_data_fselect <- diabetes_data_fselect[1:1000,]
+diabetes_data_fselect$diabetesMed <- factor(diabetes_data_fselect$diabetesMed)
+summary(diabetes_data_fselect$diabetesMed)
+```
+Apply the Boruta model.
+```{r}
+set.seed(123)
+ppmi_Boruta <- Boruta(diabetesMed~., data=diabetes_data_fselect, doTrace=0, maxRuns=101)
+print(ppmi_Boruta)
+```
+Plot the feature importance figure. 
+```{r}
+plot(ppmi_Boruta, xlab="", xaxt="n")
+lz<-lapply(1:ncol(ppmi_Boruta$ImpHistory), function(i)
+ppmi_Boruta$ImpHistory[is.finite(ppmi_Boruta$ImpHistory[, i]), i])
+names(lz)<-colnames(ppmi_Boruta$ImpHistory)
+lb<-sort(sapply(lz, median))
+axis(side=1, las=2, labels=names(lb), at=1:ncol(ppmi_Boruta$ImpHistory), cex.axis=0.8, font = 4)
+```
+
+## Discussions
+From all models above, the Naive Bayes model achieves the best balance between precision and recall, the logistic regression has the best performance in terms of accuracy, however, we cannot determine the model is the best because logistic regression can only make prediction on completed cases whose all values in all features appear in the training process, resulting in different test set with the other two models. Compared to randomly guess, the Random Forest model does not make a large progress, we think it probably because the  features are not enough. We also tried SVM model, however, the model classified all cases' medication prescription to "Yes" in all folds of experiment. So, we decided to remove this model in our report. 
+
+
+
+# Itemset Mining with the Medicines
+To find out the associations among medicine prescribed in each encounter, itemset mining has been conducted with the medicine prescriptions. 
+
+## Hypothesis
+- The usage of one medicine is always accompanied with the usage of other medicines.
+- Certain medicines are more popular than other medicines. 
+
+## Preprocessing Data
+Now preprocess the data for medicine itemset mining.    
+Features of interests are 23 medicines that have values of 4 nominal types indicating the change in usage: `No`/`Up`/`Steady`/`Down`. Check the ["23 features for medications" part](https://www.hindawi.com/journals/bmri/2014/781670/tab1/) for more details. Prepare 3 formats of the medicine data for later use:     
+
+- `data_med_binary` converts the `Up/Steady/Down` types to `Yes`;     
+- `data_med_ordinal` reserves all 4 types;    
+- `data_med_ordinal_dropno` drops the `No` type and keeps only `Up/Steady/Down` types. 
+```{r preprocessing}
+cols_med <- colnames(diabetes_wo_weight)[24:46]
+
+data_med_binary <- data.frame(lapply(diabetes_wo_weight[, cols_med], function(x){ifelse(x=="No", NA, TRUE)}))
+
+expand_med <- function(data, med){
+  temp <- as.factor(data[, which(names(data)==med)])
+  if(length(unique(temp))==1){
+    expansion <- data.frame(ifelse(temp==unique(temp), TRUE,TRUE))
+    colnames(expansion) <- paste(med,".", unique(temp),sep="")
+  }
+  else{
+    expansion <- ifelse(model.matrix(~temp + 0)=="1",TRUE,NA)
+    colnames(expansion) <- gsub("temp",paste(med,".",sep=""),colnames(expansion))
+  }
+  return(expansion)
+}
+merge_expansion <- function(data_origin, vars){
+  data <- data_origin
+  for(v in vars){
+    med_expansion <- expand_med(data, v)
+    data <- cbind(data[, -which(names(data)==v)], med_expansion)
+  }
+  return(data)
+}
+data_med_ordinal <- merge_expansion(diabetes_wo_weight[, cols_med], cols_med)
+
+data_med_ordinal_dropno <- data_med_ordinal[, -grep(".No$", colnames(data_med_ordinal))]
+# colnames(data_med_ordinal_dropno) ## double check "No" are dropped.
+```
+
+## Medications -- Binary (Yes/No)
+Define some commonly used functions `get_trans()`, `apply_ar()`, `plot_grouped_matrix()` for further itemset mining.
+```{r functions}
+library(arules)
+library(arulesViz)
+
+get_trans <- function(data_med, name){
+  med_arules <- data_med
+  for(i in colnames(data_med)){
+    med_arules[,c(i)] <- sapply(data_med[,c(i)], function(x){ifelse(is.na(x), NA, c(i))})
+  }
+  f_med_arules = paste("trans_", name, ".csv", sep="")
+  write.csv(med_arules, f_med_arules, row.names=F)
+  trans <- read.transactions(f_med_arules, sep=",", skip=1, rm.duplicates=TRUE)
+  
+  return(trans)
+}
+
+apply_ar <- function(trans, p, name){  
+  rules <- apriori(trans, parameter=p) 
+  summary(rules) 
+  write(rules, file = paste("rules_", name, ".csv", sep=""), sep=",", row.names=F)
+  plot(sort(rules), main=paste("Scatterplot of", length(rules), "Rules for", name))
+  
+  return(rules)
+}
+  
+plot_grouped_matrix <- function(rules, med){
+  fi_rules<-subset(rules, items %in% med)
+  inspect(fi_rules)
+  plot(sort(fi_rules, by="lift"), method="grouped", control=list(type="items"), main = paste("Grouped Matrix for the", length(fi_rules), med, "Associated Rules"))  
+}
+```
+
+### Get Transactions 
+Get the transactions `trans_binary` with `data_med_binary`. 
+Explore the transaction data through `summary()`, `inspect()`, and barplot visualizations.  
+```{r}
+trans_binary <- get_trans(data_med_binary, "binary")
+n_trans_binary = dim(trans_binary)[2]
+summary(trans_binary)
+itemFrequency(trans_binary)
+```
+From the image of the 100 randomly selected encounters, we can see that certain medicines look more popular than others, which may correspond to the hypothesis. The item frequency plot also verifies the phenomenon.
+```{r}
+itemFrequencyPlot(trans_binary, topN=n_trans_binary)
+image(trans_binary[sample(nrow(trans_binary),100, replace=F),], xlab="23 meds", ylab="100 randomly selected encounters")
+```
+
+### Define and Apply Data with Association Rules 
+After some fine tunings, define 4 rules of parameters. The details of these rules are summarized in the table below. For example, rule `p1` appears at least 1% of all the observations, and has the accuracy of at least 25%: 
+```{r echo=FALSE}
+p_binary <- data.frame(name=c("p1","p2","p3","p4"), support=c(.01,.01,.005,.005), confidence=c(.25,.2,.25,.2), minlen=c(2,2,2,2), n_rules=c(19,19,24,24), n_2_items=c(11,11,12,12), n_3_items=c(8,8,12,12))
+p_binary %>%
+    kable("html") %>%
+    kable_styling()
+```
+```{r}
+p1 = list(support=0.01, confidence=0.25, minlen=2) 
+p2 = list(support=0.01, confidence=0.20, minlen=2) 
+p3 = list(support=0.005, confidence=0.25, minlen=2) 
+p4 = list(support=0.005, confidence=0.20, minlen=2) 
+l_rules_binary = list()
+for(p in c("p1","p2","p3","p4")){
+  rules_binary <- apply_ar(trans_binary, eval(parse(text=p)), paste("binary_", as.character(p), sep=""))
+  l_rules_binary[[p]] <- rules_binary
+}
+```
+
+### Explore and Discuss   
+Explore the `p4` rule. 
+```{r}
+summary(l_rules_binary$p4)
+```
+Sort the rules by `lift`. Here we notice values of the RHS are either `metformin` or `insulin`.
+```{r}
+inspect(sort(l_rules_binary$p4, by="lift"))
+```
+Pick `metformin` to represent the frequently prescribed medicine and `glipizide` to represent the regularly prescribed medicince. From the grouped matrix plot we can see that as a popular prescribed medicine, `metformin` is associated with more medicines.
+```{r, message=FALSE, results="hide"}
+plot_grouped_matrix(l_rules_binary$p4, "metformin")
+plot_grouped_matrix(l_rules_binary$p4, "glipizide")
+```
+
+## Medications -- Ordinal (Up/Down/Steady/No)
+### Get Transactions    
+Get the transactions `trans_ordinal` with `data_med_ordinal`. 
+```{r}
+trans_ordinal <- get_trans(data_med_ordinal, "ordinal")
+n_trans_ordinal = dim(trans_ordinal)[2]
+```
+There are `r n_trans_ordinal` combinations of medicine and their changes in prescription compared to the previous encounter. Explore the transaction data.
+```{r}
+summary(trans_ordinal)
+itemFrequencyPlot(trans_ordinal, topN=n_trans_ordinal, cex.names=0.5) 
+image(trans_ordinal[sample(nrow(trans_ordinal),100, replace=F),], xlab="71 medication usage cases", ylab="100 randomly selected encounters")
+```
+With the visualization, we can see the ordinal data is very dense at the "No" type that takes the majority of the prescriptions for some medicines. 
+
+### Define and Apply Data with Association Rules  
+After multiple trials of fine tuning, one parameter rule is finally defined. The details of the rule is summarized as below. The values of `support` and `confidence` have to be set to be very big otherwise there will be too many rules (1~2 millions).
+```{r echo=FALSE}
+p_ordinal <- data.frame(name=c("p5"), support=c(.9999), confidence=c(.9999), minlen=c(5), n_rules=c(154), n_5_items=c(105), n_6_items=c(42), n_7_items=c(7))
+p_ordinal %>%
+    kable("html") %>%
+    kable_styling()
+```
+```{r}
+p5 = list(support=0.9999, confidence=0.9999, minlen=5) 
+rules_ordinal_p5 <- apply_ar(trans_ordinal, p5, "ordinal_p5")
+```
+
+### Explore and Discuss
+Check the `p5` rule. 
+```{r}
+summary(rules_ordinal_p5)
+```
+Sort the rules by `lift` and pick the top 5 rules.
+```{r}
+inspect(sort(rules_ordinal_p5, by="lift")[1:5])
+```
+Pick the frequently appeared `metformin.pioglitazone.No` to visualize. From the plot we can see most medicines associated are ended up with a "No". It actually gives little useful information, as in reality, most of the 23 medicines won't be prescribed at the same time, making "No" a normal choice of little interest to us.
+```{r, message=FALSE, results="hide", fig.height=15}
+plot_grouped_matrix(rules_ordinal_p5, "metformin.pioglitazone.No")
+```
+The result does not look ideal due to high density of "No" for some prescriptions. Let's try again with ordinal data, but dropping the "No" out of the ordinal choices this time.
+
+## Medications -- Ordinal without No (Up/Down/Steady)
+### Get Transactions    
+```{r}
+trans_ordinal_dropno <- get_trans(data_med_ordinal_dropno, "ordinal_dropno")
+n_trans_ordinal_dropno = dim(trans_ordinal_dropno)[2]
+```
+After dropping the medicines with "No" type, there are `r n_trans_ordinal_dropno` combinations of medicine and their changes in prescription compared to the previous encounter. Explore the transaction data.
+```{r}
+summary(trans_ordinal_dropno)
+```
+Compared to the previous section, the item frequency plot looks much diverse now. From the 100 randomly selected encounters image that looks less dense, we can see that some medicines are of much higher frequency of prescriptions. 
+```{r}
+itemFrequencyPlot(trans_ordinal_dropno, topN=n_trans_ordinal_dropno, cex.names=0.5)
+image(trans_ordinal_dropno[sample(nrow(trans_ordinal_dropno),100, replace=F),], xlab="48 medication usage cases", ylab="100 randomly selected encounters")
+```
+
+### Define and Apply Data with Association Rules    
+Define 5 rules of parameters. The details are summarized in the table below.  
+```{r echo=FALSE}
+p_ordinal_dropno <- data.frame(name=c("p6","p7","p8","p9", "p10"), support=c(.001,.001,.001,.005,.001), confidence=c(.25,.3,.3,.3,.1), minlen=c(2,4,2,2,2), n_rules=c(54,4,37,11,130), n_2_items=c(20,0,15,7,56), n_3_items=c(30,0,18,4,66), n_4_items=c(4,4,4,0,8))
+p_ordinal_dropno %>%
+    kable("html") %>%
+    kable_styling()
+```
+```{r}
+p6 = list(support=0.001, confidence=0.25, minlen=2) 
+p7 = list(support=0.001, confidence=0.3, minlen=4) 
+p8 = list(support=0.001, confidence=0.3, minlen=2) 
+p9 = list(support=0.005, confidence=0.3, minlen=2) 
+p10 = list(support=0.001, confidence=0.1, minlen=2) 
+l_rules_ordinal_dropno = list()
+for(p in c("p6","p7","p8","p9", "p10")){
+  rules_ordinal_dropno <- apply_ar(trans_ordinal_dropno, eval(parse(text=p)), paste("ordinal_dropno_", as.character(p), sep=""))
+  l_rules_ordinal_dropno[[p]] <- rules_ordinal_dropno
+}
+```
+
+### Explore and Discuss    
+Explore the rule_ordinal_dropno: `p6` with `r length(l_rules_ordinal_dropno$p6)` rules. 
+```{r}
+summary(l_rules_ordinal_dropno$p6)
+```
+Similar to the results of `rules_binary`, all filtered RHS are `insulin.Steady` and `metformin.Steady`, again shows that insulin and metformin are very frequently prescribed.
+```{r}
+inspect(sort(l_rules_ordinal_dropno$p6, by="lift"))
+```
+Plot the grouped matrix for `insulin.Steady` and `glimepiride.Steady` to compare the medicines of different frequency levels of prescriptions.
+```{r message=FALSE, results="hide", fig.height=10}
+plot_grouped_matrix(l_rules_ordinal_dropno$p6, "insulin.Steady")
+plot_grouped_matrix(l_rules_ordinal_dropno$p6, "glimepiride.Steady") 
+```
+
+Explore the rule_ordinal_dropno: `p10` with `r length(l_rules_ordinal_dropno$p10)` rules. 
+```{r}
+summary(l_rules_ordinal_dropno$p10)
+```
+Sort the rules by `lift` and show the top 10. This time RHS shows diversified results.
+```{r}
+inspect(sort(l_rules_ordinal_dropno$p10, by="lift")[1:10])
+```
+Plot grouped matrix for `insulin.Steady`, `insulin.Up`, and `pioglitazone.Steady`. LHS rule of `insulin.Up` combined with `metformin.Steady` is strongly associated with RHS rule of `rosiglitazone.Steady`. 
+```{r message=FALSE, results="hide", fig.height=15}
+plot_grouped_matrix(l_rules_ordinal_dropno$p10, "insulin.Steady")
+plot_grouped_matrix(l_rules_ordinal_dropno$p10, "insulin.Up") 
+```
+Asides from the commonly seen `metformin.Steady` and `insulin.Steady`, `pioglitazone.Steady` is also associated with the use of `glyburide.Steady` and `glipizide.Steady`.
+```{r message=FALSE, results="hide", fig.height=15}
+plot_grouped_matrix(l_rules_ordinal_dropno$p10, "pioglitazone.Steady") 
+```
+
+
+
+#Conclusions
+ 
+Patient Readmission Prediction
+
+- All the models we used (Naive Bayes, Random Forest, Logistic Regression and SVM) can beat the majority baseline.
+- Logistic Regression has the highest AUC score.
+- The most important features include admission source id, discharge disposition id,
+number of diagnoses, number of emergency visits, number of inpatient days, and number of out patient days.
+
+Diabetic Medication Prescription Prediction
+
+- All the models we used (Naive Bayes, Random Forest, Logistic Regression) are close to the baseline. The SVM modle is the worst one that can only predict the result as the majority case, thus we drop the SVM part in the final report.
+- More information will be needed if we want to predict the diabetic medication prescription.
+- The most important features are AICresult, age, and time in hospital.
+ 
+Itemset Mining with the Medicines
+
+- Metformin and Insulin are more popular than other medicines.
+- To get the appropriate amounts of rules, association rules are more lenient with binarized medication data, and more strict with ordinal data without dropping the "No" option.
+- Dropping the "No" option when exploring with ordinal data helps reduce the noise due to high data density and provide more insights into the more interesting patterns.	
+
+
+
+#Ackowledgement
+The dataset is download from UCI Machine Learning Repository. 
+(link: http://archive.ics.uci.edu/ml/datasets/Diabetes+130-US+hospitals+for+years+1999-2008)
+
+
+
+#Reference
+University of Michigan HS 650, *Apriori Association Rules Learning* http://www.socr.umich.edu/people/dinov/courses/DSPA_notes/11_Apriory_AssocRuleLearning.html
+
+Centers for Disease Control and Prevention, *Estimates of diabetes and its burden in the United States*,  National diabetes statistics report, 2017.
+
+Beata Strack, Jonathan P. DeShazo, Chris Gennings, Juan L. Olmo, Sebastian Ventura, Krzysztof J. Cios, and John N. Clore, *Impact of HbA1c Measurement on Hospital Readmission Rates: Analysis of 70,000 Clinical Database Patient Records*, BioMed Research International, vol. 2014, Article ID 781670, 11 pages, 2014.
